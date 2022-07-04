@@ -93,6 +93,8 @@ unsigned long receive() {
 void set_relay(uint32_t status) {
     digitalWrite(kRelayWritePin, status);
     payload.data.relay = static_cast<uint8_t>(status == kOn ? 1 : 0);
+    Serial.print("Relay: ");
+    Serial.println(status == kOn ? "on" : "off");
 }
 
 void send() {
@@ -100,76 +102,81 @@ void send() {
     driver.waitPacketSent();
 }
 
-bool enoughWatering() {
-    const uint32_t now = millis();
+bool enoughWatering(uint32_t now) {
     // Wrap-around. Just exit.
     if (now < elapsed_watering) return true;
     return (now - elapsed_watering) > kMinimumWateringMillis;
 }
 
+void startWatering(uint32_t now) {
+    state = State::kWaitingForWet;
+    elapsed_watering = now;
+    set_relay(kOn);
+}
+
+void stopWatering() {
+    state = State::kWaitingForDry;
+    set_relay(kOff);
+}
+
 void loop() {
-    if (millis() - elapsed_measure > 250) {
+    const uint32_t now = millis();
+
+    if (now - elapsed_measure > 250) {
+        elapsed_measure = now;
         const uint32_t dryness = analogRead(kDrynessAnalogPin);
         samples.add(static_cast<float>(dryness));
-        elapsed_measure = millis();
         act(1);
 
         const uint32_t average = static_cast<uint32_t>(samples.getAverage());
-        Serial.println("average: ");
+        Serial.print("Average: ");
         Serial.println(average);
         payload.data.dryness = average;
 
-        if (samples.isFull() && init_measures == 10) {
-            init_measures++;
-            // Firs time.
-            Serial.print("init assessment: ");
-            if (average <= kFullyWet) {
-                state = State::kWaitingForDry;
-                set_relay(kOff);
-                Serial.println("wet! stopping pump");
-            } else if (average >= kFullyDry) {
-                state = State::kWaitingForWet;
-                Serial.println("dry! starting pump");
-                elapsed_watering = millis();
-                set_relay(kOn);
+        if (samples.isFull()) {
+            if (init_measures == 10) {
+                init_measures++;
+                // Firs time.
+                Serial.print("Init assessment: ");
+                if (average >= kFullyDry) {
+                    startWatering(now);
+                    Serial.println("too dry; starting pump");
+                } else {
+                    stopWatering();
+                    Serial.println("wet or not dry enough; stopping pump");
+                }
+            } else if (init_measures < 10) {
+                init_measures++;
             } else {
-                state = State::kWaitingForDry;
-                Serial.println("???");
-            }
-        } else if (samples.isFull() && init_measures < 10) {
-            init_measures++;
-        } else if (samples.isFull()) {
-            if (state == State::kWaitingForDry && average >= kFullyDry) {
-                state = State::kWaitingForWet;
-                elapsed_watering = millis();
-                set_relay(kOn);
-                send();
-                Serial.println("starting pump, waiting for fully wet");
-            } else if (state == State::kWaitingForWet && average <= kFullyWet && enoughWatering()) {
-                state = State::kWaitingForDry;
-                set_relay(kOff);
-                send();
-                Serial.println("stopping pump, waiting for fully dry");
+                if (state == State::kWaitingForDry && average >= kFullyDry) {
+                    startWatering(now);
+                    send();
+                    Serial.println("starting pump; waiting for fully wet");
+                } else if (state == State::kWaitingForWet && average <= kFullyWet && enoughWatering(now)) {
+                    stopWatering();
+                    send();
+                    Serial.println("stopping pump; waiting for fully dry");
+                }
             }
         }
     }
 
-    if (millis() - elapsed_send > 1000 * 5) {
+    if (now - elapsed_send > 1000 * 5) {
         send();
-        Serial.print("sent dryness: ");
+        Serial.print("Sent dryness: ");
         Serial.println(payload.data.dryness);
-        elapsed_send = millis();
+        elapsed_send = now;
         act(3);
     }
 
     switch (receive()) {
         case kSwitchOn:
-            Serial.println("switch ON");
+            Serial.println("Switch ON");
             set_relay(kOn);
             send();
             break;
         case kSwitchOff:
-            Serial.println("switch OFF");
+            Serial.println("Switch OFF");
             set_relay(kOff);
             send();
             break;
