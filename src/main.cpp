@@ -16,7 +16,7 @@ constexpr uint32_t kFullyWatered = 300;
 // We want 3 minutes of watering at minimum.
 constexpr uint32_t kMinimumWateringMillis = 1000 * 60 * 3;
 // Milliseconds.
-constexpr uint32_t kPumpCycleOn = 2500, kPumpCyclePause = 3000;
+constexpr uint32_t kPumpCycleOn = 3500, kPumpCyclePause = 250;
 // RTL channel 1, button 4:
 constexpr unsigned long kSwitchOff = 1397844ul;
 constexpr unsigned long kSwitchOn = 1397845ul;
